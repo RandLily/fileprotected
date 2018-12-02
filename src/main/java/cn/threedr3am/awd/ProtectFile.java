@@ -11,11 +11,14 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * by threedr3am (2018-12-01)
+ * @author xuanyh
+ * @create 2018-12-01 10:08
  */
 public class ProtectFile {
     private static Logger log = Logger.getLogger(ProtectFile.class.toString());
@@ -33,21 +36,46 @@ public class ProtectFile {
     public static void execute(String sourceDirUrl, String targetDirurl) {
         File sourceDir = new File(sourceDirUrl);
         File targetDir = new File(targetDirurl);
+        //检查源、目标目录合法性
         boolean checkDirResult = checkDir(sourceDir, targetDir);
         if (!checkDirResult)
             System.exit(1);
+        //两个线程处理，一个防止修改、新增，一个防止删除
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        Map<String, FileInfo> sourceFileInfo = null;
         try {
-            Map<String, FileInfo> sourceFileInfo = readSourceFileInfo(sourceDir);
-            while (true) {
-                protectedTargetDir(sourceFileInfo, targetDir);
-                checkLostFile(sourceFileInfo, sourceDir, targetDir);
-                Thread.sleep(1 * 1000);
-            }
+            //读取源镜像目录内容，生成保护文档缓存
+            sourceFileInfo = readSourceFileInfo(sourceDir);
         } catch (IOException e) {
             e.printStackTrace();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
         }
+        Map<String, FileInfo> finalSourceFileInfo = sourceFileInfo;
+        executorService.execute(() -> {
+            while (true) {
+                try {
+                    //目标目录遍历，防止被文件、文件夹修改、新增
+                    protectedTargetDir(finalSourceFileInfo, targetDir);
+                    Thread.sleep(1 * 1000);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        executorService.execute(() -> {
+            while (true) {
+                try {
+                    //根据源目录镜像，检查目标目录丢失文件，并恢复
+                    checkLostFile(finalSourceFileInfo, sourceDir, targetDir);
+                    Thread.sleep(1 * 1000);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
     }
 
     /**
@@ -59,10 +87,13 @@ public class ProtectFile {
      * @throws IOException
      */
     private static void checkLostFile(Map<String, FileInfo> sourceFileInfo, File sourceDir, File targetDir) throws IOException {
+        //遍历源镜像目录文档
         for (Map.Entry<String, FileInfo> entry : sourceFileInfo.entrySet()) {
             FileInfo fileInfo = entry.getValue();
+            //目标目录中目标文件路径
             String targetFileUrl = targetDir.getAbsolutePath() + fileInfo.getUrl().replace(sourceDir.getAbsolutePath(), "");
             File file = new File(targetFileUrl);
+            //不存在则意味被删除，需要进行恢复，目录则新建，文件则写入备份
             if (!file.exists()) {
                 if (fileInfo.isFile()) {
                     BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream(fileInfo.getUrl()));
@@ -93,11 +124,12 @@ public class ProtectFile {
         Files.walkFileTree(targetDir.toPath(), new SimpleFileVisitor<Path>() {
 
             @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
                 File readFile = dir.toFile();
                 if (readFile.exists()) {
                     String path = readFile.getAbsolutePath().replace(targetDir.getAbsolutePath(), "");
                     FileInfo sourceFileInfo = sourceFileInfoMap.get(path);
+                    //源镜像目录不存在该目录，则删除
                     if (sourceFileInfo == null) {
                         if (readFile.canWrite()) {
                             if (readFile.delete()) {
@@ -119,40 +151,40 @@ public class ProtectFile {
                 if (readFile.exists()) {
                     String path = readFile.getAbsolutePath().replace(targetDir.getAbsolutePath(), "");
                     FileInfo sourceFileInfo = sourceFileInfoMap.get(path);
-                    if (readFile.isFile()) {
-                        if (sourceFileInfo == null) {
+                    //源镜像目录不存在该文件，则删除
+                    if (sourceFileInfo == null) {
+                        if (readFile.canWrite()) {
+                            if (readFile.delete()) {
+                                log.info("删除异常文件：" + readFile.getAbsolutePath());
+                            } else {
+                                log.info("删除异常文件：" + readFile.getAbsolutePath() + " 失败");
+                            }
+                        } else {
+                            log.info("异常文件：" + readFile.getAbsolutePath() + " 不可写");
+                        }
+                    } else {
+                        BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream(readFile));
+                        byte[] bytes = new byte[bufferedInputStream.available()];
+                        bufferedInputStream.read(bytes);
+                        String md5 = MD5Util.getMD5(bytes);
+                        bufferedInputStream.close();
+                        //检查目标文件md5是否和源镜像文件md5一致，不一致则删除并恢复
+                        if (!sourceFileInfo.getMd5().equals(md5)) {
                             if (readFile.canWrite()) {
                                 if (readFile.delete()) {
-                                    log.info("删除异常文件：" + readFile.getAbsolutePath());
+                                    bufferedInputStream = new BufferedInputStream(new FileInputStream(sourceFileInfo.getUrl()));
+                                    bytes = new byte[bufferedInputStream.available()];
+                                    bufferedInputStream.read(bytes);
+                                    bufferedInputStream.close();
+                                    BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(new FileOutputStream(file.toFile()));
+                                    bufferedOutputStream.write(bytes);
+                                    bufferedOutputStream.close();
+                                    log.info("删除&重写异常文件：" + readFile.getAbsolutePath());
                                 } else {
-                                    log.info("删除异常文件：" + readFile.getAbsolutePath() + " 失败");
+                                    log.info("删除&重写异常文件：" + readFile.getAbsolutePath() + " 失败");
                                 }
                             } else {
                                 log.info("异常文件：" + readFile.getAbsolutePath() + " 不可写");
-                            }
-                        } else {
-                            BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream(readFile));
-                            byte[] bytes = new byte[bufferedInputStream.available()];
-                            bufferedInputStream.read(bytes);
-                            String md5 = MD5Util.getMD5(bytes);
-                            bufferedInputStream.close();
-                            if (!sourceFileInfo.getMd5().equals(md5)) {
-                                if (readFile.canWrite()) {
-                                    if (readFile.delete()) {
-                                        bufferedInputStream = new BufferedInputStream(new FileInputStream(sourceFileInfo.getUrl()));
-                                        bytes = new byte[bufferedInputStream.available()];
-                                        bufferedInputStream.read(bytes);
-                                        bufferedInputStream.close();
-                                        BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(new FileOutputStream(file.toFile()));
-                                        bufferedOutputStream.write(bytes);
-                                        bufferedOutputStream.close();
-                                        log.info("删除&重写异常文件：" + readFile.getAbsolutePath());
-                                    } else {
-                                        log.info("删除&重写异常文件：" + readFile.getAbsolutePath() + " 失败");
-                                    }
-                                } else {
-                                    log.info("异常文件：" + readFile.getAbsolutePath() + " 不可写");
-                                }
                             }
                         }
                     }
@@ -175,6 +207,7 @@ public class ProtectFile {
             @Override
             public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
                 File readFile = dir.toFile();
+                //源镜像目录备份
                 if (readFile.exists()) {
                     String realFileName = readFile.getAbsolutePath().replace(sourceDir.getAbsolutePath(), "");
                     FileInfo fileInfo = new FileInfo();
@@ -188,6 +221,7 @@ public class ProtectFile {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 File readFile = file.toFile();
+                //源镜像文件备份
                 if (readFile.exists()) {
                     String realFileName = readFile.getAbsolutePath().replace(sourceDir.getAbsolutePath(), "");
                     if (readFile.isFile()) {
@@ -215,10 +249,12 @@ public class ProtectFile {
      * @return
      */
     private static boolean checkDir(File sourceDir, File targetDir) {
+        //源镜像目录需拥有读权限
         if (!sourceDir.isDirectory() || !sourceDir.canRead()) {
             log.log(Level.SEVERE, "路径指向：" + sourceDir.getAbsolutePath() + "非目录或不可读");
             return false;
         }
+        //目标保护目录需有读写权限
         if (!targetDir.isDirectory() || !targetDir.canRead() || !targetDir.canWrite()) {
             log.log(Level.SEVERE, "路径指向：" + targetDir.getAbsolutePath() + "非目录或不可读、写");
             return false;
