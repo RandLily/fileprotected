@@ -2,8 +2,12 @@ package cn.threedr3am.awd;
 
 import cn.threedr3am.awd.bean.FileInfo;
 import cn.threedr3am.awd.utils.MD5Util;
+import cn.threedr3am.awd.utils.StreamUtil;
 
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,8 +73,6 @@ public class ProtectFile {
                     //根据源目录镜像，检查目标目录丢失文件，并恢复
                     checkLostFile(finalSourceFileInfo, sourceDir, targetDir);
                     Thread.sleep(1 * 1000);
-                } catch (IOException e) {
-                    e.printStackTrace();
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -86,7 +88,7 @@ public class ProtectFile {
      * @param targetDir
      * @throws IOException
      */
-    private static void checkLostFile(Map<String, FileInfo> sourceFileInfo, File sourceDir, File targetDir) throws IOException {
+    private static void checkLostFile(Map<String, FileInfo> sourceFileInfo, File sourceDir, File targetDir) {
         //遍历源镜像目录文档
         for (Map.Entry<String, FileInfo> entry : sourceFileInfo.entrySet()) {
             FileInfo fileInfo = entry.getValue();
@@ -95,14 +97,13 @@ public class ProtectFile {
             File file = new File(targetFileUrl);
             //不存在则意味被删除，需要进行恢复，目录则新建，文件则写入备份
             if (!file.exists()) {
+                BufferedInputStream bufferedInputStream = null;
+                BufferedOutputStream bufferedOutputStream = null;
                 if (fileInfo.isFile()) {
-                    BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream(fileInfo.getUrl()));
-                    byte[] bytes = new byte[bufferedInputStream.available()];
-                    bufferedInputStream.read(bytes);
-                    bufferedInputStream.close();
-                    BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(new FileOutputStream(file));
-                    bufferedOutputStream.write(bytes);
-                    bufferedOutputStream.close();
+                    byte[] bytes = StreamUtil.readBytes(new File(fileInfo.getUrl()));
+                    if (bytes != null) {
+                        StreamUtil.writeBytes(file, bytes);
+                    }
                     log.info("写入被删除文件：" + targetFileUrl);
                 } else {
                     file.mkdir();
@@ -146,7 +147,7 @@ public class ProtectFile {
             }
 
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 File readFile = file.toFile();
                 if (readFile.exists()) {
                     String path = readFile.getAbsolutePath().replace(targetDir.getAbsolutePath(), "");
@@ -163,23 +164,20 @@ public class ProtectFile {
                             log.info("异常文件：" + readFile.getAbsolutePath() + " 不可写");
                         }
                     } else {
-                        BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream(readFile));
-                        byte[] bytes = new byte[bufferedInputStream.available()];
-                        bufferedInputStream.read(bytes);
-                        String md5 = MD5Util.getMD5(bytes);
-                        bufferedInputStream.close();
+                        byte[] targetFilebytes = StreamUtil.readBytes(readFile);
+
                         //检查目标文件md5是否和源镜像文件md5一致，不一致则删除并恢复
-                        if (!sourceFileInfo.getMd5().equals(md5)) {
+                        if (targetFilebytes != null && !sourceFileInfo.getMd5().equals(MD5Util.getMD5(targetFilebytes))) {
                             if (readFile.canWrite()) {
                                 if (readFile.delete()) {
-                                    bufferedInputStream = new BufferedInputStream(new FileInputStream(sourceFileInfo.getUrl()));
-                                    bytes = new byte[bufferedInputStream.available()];
-                                    bufferedInputStream.read(bytes);
-                                    bufferedInputStream.close();
-                                    BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(new FileOutputStream(file.toFile()));
-                                    bufferedOutputStream.write(bytes);
-                                    bufferedOutputStream.close();
-                                    log.info("删除&重写异常文件：" + readFile.getAbsolutePath());
+                                    BufferedInputStream sourceBufferedInputStream = null;
+                                    byte[] sourceFileBytes = StreamUtil.readBytes(new File(sourceFileInfo.getUrl()));
+                                    ;
+
+                                    if (sourceFileBytes != null) {
+                                        StreamUtil.writeBytes(file.toFile(), sourceFileBytes);
+                                        log.info("删除&重写异常文件：" + readFile.getAbsolutePath());
+                                    }
                                 } else {
                                     log.info("删除&重写异常文件：" + readFile.getAbsolutePath() + " 失败");
                                 }
@@ -219,17 +217,15 @@ public class ProtectFile {
             }
 
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 File readFile = file.toFile();
                 //源镜像文件备份
                 if (readFile.exists()) {
                     String realFileName = readFile.getAbsolutePath().replace(sourceDir.getAbsolutePath(), "");
                     if (readFile.isFile()) {
-                        BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream(readFile));
-                        byte[] bytes = new byte[bufferedInputStream.available()];
-                        bufferedInputStream.read(bytes);
+                        byte[] bytes = StreamUtil.readBytes(readFile);
                         FileInfo fileInfo = new FileInfo();
-                        fileInfo.setMd5(MD5Util.getMD5(bytes));
+                        fileInfo.setMd5(bytes != null ? MD5Util.getMD5(bytes) : "");
                         fileInfo.setUrl(readFile.getAbsolutePath());
                         fileInfo.setFile(true);
                         fileInfoMap.put(realFileName, fileInfo);
