@@ -4,13 +4,18 @@ import cn.threedr3am.awd.bean.FileInfo;
 import cn.threedr3am.awd.utils.MD5Util;
 import cn.threedr3am.awd.utils.StreamUtil;
 
+import com.sun.javafx.scene.shape.PathUtils;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
@@ -100,12 +105,11 @@ public class ProtectFile {
             File file = new File(targetFileUrl);
             //不存在则意味被删除，需要进行恢复，目录则新建，文件则写入备份
             if (!file.exists()) {
-                BufferedInputStream bufferedInputStream = null;
-                BufferedOutputStream bufferedOutputStream = null;
                 if (fileInfo.isFile()) {
-                    byte[] bytes = StreamUtil.readBytes(new File(fileInfo.getUrl()));
-                    if (bytes != null) {
-                        StreamUtil.writeBytes(file, bytes);
+                    try {
+                        Files.copy(Paths.get(fileInfo.getUrl()),Paths.get(targetFileUrl));
+                    } catch (IOException e) {
+                        e.printStackTrace();
                     }
                     log.info("写入被删除文件：" + targetFileUrl);
                 } else {
@@ -172,7 +176,6 @@ public class ProtectFile {
                         if (!sourceFileInfo.getMd5().equals(md5)) {
                             if (readFile.canWrite()) {
                                 if (readFile.delete()) {
-                                    BufferedInputStream sourceBufferedInputStream = null;
                                     byte[] sourceFileBytes = StreamUtil.readBytes(new File(sourceFileInfo.getUrl()));
 
                                     if (sourceFileBytes != null) {
