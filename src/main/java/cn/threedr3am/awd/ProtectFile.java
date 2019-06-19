@@ -49,10 +49,13 @@ public class ProtectFile {
         Map<String, FileInfo> sourceFileInfo = null;
         try {
             //读取源镜像目录内容，生成保护文档缓存
+            log.info("------------------------ read source image info begin");
             sourceFileInfo = readSourceFileInfo(sourceDir);
+            log.info("------------------------ read source image info end");
         } catch (IOException e) {
             e.printStackTrace();
         }
+        log.info("running..............................");
         Map<String, FileInfo> finalSourceFileInfo = sourceFileInfo;
         executorService.execute(() -> {
             while (true) {
@@ -164,15 +167,13 @@ public class ProtectFile {
                             log.info("异常文件：" + readFile.getAbsolutePath() + " 不可写");
                         }
                     } else {
-                        byte[] targetFilebytes = StreamUtil.readBytes(readFile);
-
+                        String md5 = MD5Util.getMD5(readFile);
                         //检查目标文件md5是否和源镜像文件md5一致，不一致则删除并恢复
-                        if (targetFilebytes != null && !sourceFileInfo.getMd5().equals(MD5Util.getMD5(targetFilebytes))) {
+                        if (!sourceFileInfo.getMd5().equals(md5)) {
                             if (readFile.canWrite()) {
                                 if (readFile.delete()) {
                                     BufferedInputStream sourceBufferedInputStream = null;
                                     byte[] sourceFileBytes = StreamUtil.readBytes(new File(sourceFileInfo.getUrl()));
-                                    ;
 
                                     if (sourceFileBytes != null) {
                                         StreamUtil.writeBytes(file.toFile(), sourceFileBytes);
@@ -223,9 +224,10 @@ public class ProtectFile {
                 if (readFile.exists()) {
                     String realFileName = readFile.getAbsolutePath().replace(sourceDir.getAbsolutePath(), "");
                     if (readFile.isFile()) {
-                        byte[] bytes = StreamUtil.readBytes(readFile);
+                        String md5 = MD5Util.getMD5(readFile);
+
                         FileInfo fileInfo = new FileInfo();
-                        fileInfo.setMd5(bytes != null ? MD5Util.getMD5(bytes) : "");
+                        fileInfo.setMd5(md5);
                         fileInfo.setUrl(readFile.getAbsolutePath());
                         fileInfo.setFile(true);
                         fileInfoMap.put(realFileName, fileInfo);

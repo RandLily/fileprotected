@@ -1,5 +1,10 @@
 package cn.threedr3am.awd.utils;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
@@ -8,6 +13,9 @@ import java.security.NoSuchAlgorithmException;
  * @create 2018-12-01 10:26
  **/
 public class MD5Util {
+
+    private static final int MAX_READ_LENGTH = 100 * 1024;//每次最大读取100K，防止溢出
+
     /**
      * 对字符串md5加密
      *
@@ -36,5 +44,39 @@ public class MD5Util {
             secpwd.append(Integer.toString(v, 16));
         }
         return secpwd.toString();
+    }
+
+    public static String getMD5(File readFile) {
+        String md5 = null;
+        if (readFile.length() > MAX_READ_LENGTH) {
+            try {
+                long fileLength = readFile.length();
+                for (long j = 0; j < fileLength ; j+=Integer.MAX_VALUE) {
+                    int mapLength = fileLength < (j + Integer.MAX_VALUE) ? (int) (
+                        fileLength - j) : Integer.MAX_VALUE;
+                    MappedByteBuffer mappedByteBuffer = new RandomAccessFile(readFile, "r")
+                        .getChannel()
+                        .map(FileChannel.MapMode.READ_ONLY, j, mapLength);
+                    StringBuilder stringBuilder = new StringBuilder();
+                    for (long i = 0; i < mapLength; i+=MAX_READ_LENGTH) {
+                        int length = mapLength < (i + MAX_READ_LENGTH) ? (int) (
+                            mapLength - i) : MAX_READ_LENGTH;
+                        byte[] ds = new byte[length];
+                        for (int index = 0; index < length; index++) {
+                            byte b = mappedByteBuffer.get();
+                            ds[index] = b;
+                        }
+                        stringBuilder.append(getMD5(ds));
+                    }
+                    md5 = MD5Util.getMD5(stringBuilder.toString());
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } else {
+            byte[] bytes = StreamUtil.readBytes(readFile);
+            md5 = bytes != null ? MD5Util.getMD5(bytes) : "";
+        }
+        return md5;
     }
 }
