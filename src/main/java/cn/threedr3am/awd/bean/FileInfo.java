@@ -1,7 +1,7 @@
 package cn.threedr3am.awd.bean;
 
 /**
- * @author xuanyh
+ * @author met3d
  * @create 2018-12-01 10:16
  **/
 public class FileInfo {

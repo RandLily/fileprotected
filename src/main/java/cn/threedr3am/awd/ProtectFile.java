@@ -26,7 +26,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * @author xuanyh
+ * @author met3d
  * @create 2018-12-01 10:08
  */
 public class ProtectFile {

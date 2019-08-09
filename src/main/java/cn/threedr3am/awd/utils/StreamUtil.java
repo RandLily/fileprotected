@@ -8,7 +8,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 
 /**
- * @author xuanyh
+ * @author met3d
  * @create 2018-12-04 12:09
  **/
 public class StreamUtil {
